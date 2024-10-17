@@ -1,0 +1,32 @@
+[
+    {
+        "Date": "2024-10-14 13:33:34",
+        "message": "Function format_timestamp executed ERROR",
+        "Type error": "unconverted data remains: z"
+    },
+    {
+        "Date": "2024-10-14 13:33:34",
+        "message": "Function preparing_data executed ERROR",
+        "Type error": "unconverted data remains: z"
+    },
+    {
+        "Date": "2024-10-14 13:34:55",
+        "message": "Function preparing_data executed ERROR",
+        "Type error": "unconverted data remains: z"
+    },
+    {
+        "Date": "2024-10-14 13:52:07",
+        "message": "Function preparing_data executed ERROR",
+        "Type error": "unconverted data remains: z"
+    },
+    {
+        "Date": "2024-10-14 13:55:55",
+        "message": "Function preparing_data executed ERROR",
+        "Type error": " <class \"ValueError\">: unconverted data remains: z"
+    },
+    {
+        "Date": "2024-10-14 13:57:44",
+        "message": "Function preparing_data executed ERROR",
+        "Type error": "unconverted data remains: z"
+    }
+]

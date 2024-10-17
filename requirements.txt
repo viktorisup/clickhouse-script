@@ -1,0 +1,2 @@
+aioch==0.0.2
+requests==2.32.3
