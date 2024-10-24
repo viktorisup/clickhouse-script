@@ -16,13 +16,13 @@ arg = parser.parse_args()
 host_addr = '192.168.xxx.xxx'
 port_num = 9000
 user_name = 'xxx'
-user_passwd = 'xxxxxxxx'
+user_passwd = 'xxxxx'
 name_base = 'xxx'
 House_Cluster_name = 'HouseCluster'
-TABLE_NAME_REPL = "transaction_repl4"
-TABLE_NAME_DIST = "transaction_dist4"
-TABLE_NAME_SVC = "service_table4"
-PSP_EXPORT_1C_BASE_URL = "https://xxxxxxxxx/api"
+TABLE_NAME_REPL = "transaction_repl1"
+TABLE_NAME_DIST = "transaction_dist1"
+TABLE_NAME_SVC = "service_table1"
+PSP_EXPORT_1C_BASE_URL = "https://xxxxxxx/api"
 
 
 def log_to_json(log_entry):
@@ -67,7 +67,7 @@ def logs_decorator(func):
 
 INIT_QUERY_Replicate = f"""
 CREATE TABLE {TABLE_NAME_REPL} ON CLUSTER {House_Cluster_name} (
-    txn_id Nullable(String),
+    txn_id UInt64,
     project_id Nullable(UInt32),
     mst_id Nullable(String),
     merch_id Nullable(String),
@@ -107,18 +107,18 @@ CREATE TABLE {TABLE_NAME_REPL} ON CLUSTER {House_Cluster_name} (
     txn_confirmed_at  Nullable(DateTime),
     txn_reconciled_at Nullable(DateTime),
     txn_settled_at    Nullable(DateTime),
-    txn_updated_at    Nullable(DateTime),
+    txn_updated_at    DateTime,
     txn_created_at    DateTime,
     txn_cms_updated_at Nullable(DateTime),
     txn_cms_created_at Nullable(DateTime),
-)ENGINE = ReplicatedMergeTree(\'/clickhouse/tables/{{shard}}/{TABLE_NAME_REPL}\', \'{{replica}}\')
+)ENGINE = ReplicatedReplacingMergeTree(\'/clickhouse/tables/{{shard}}/{TABLE_NAME_REPL}\', \'{{replica}}\', txn_id)
 PARTITION BY toYYYYMM(txn_created_at)
-ORDER BY txn_created_at;
+ORDER BY cityHash64(concat(toString(txn_id), '|', toString(txn_updated_at)));
 """
 
 INIT_QUERY_Distributed = f"""
 CREATE TABLE {TABLE_NAME_DIST} ON CLUSTER {House_Cluster_name} (
-    txn_id Nullable(String),
+    txn_id UInt64,
     project_id Nullable(UInt32),
     mst_id Nullable(String),
     merch_id Nullable(String),
@@ -158,11 +158,11 @@ CREATE TABLE {TABLE_NAME_DIST} ON CLUSTER {House_Cluster_name} (
     txn_confirmed_at  Nullable(DateTime),
     txn_reconciled_at Nullable(DateTime),
     txn_settled_at    Nullable(DateTime),
-    txn_updated_at    Nullable(DateTime),
+    txn_updated_at    DateTime,
     txn_created_at    DateTime,
     txn_cms_updated_at Nullable(DateTime),
     txn_cms_created_at Nullable(DateTime),
-)ENGINE = Distributed({House_Cluster_name}, {name_base}, {TABLE_NAME_REPL}, (txn_created_at));
+)ENGINE = Distributed({House_Cluster_name}, {name_base}, {TABLE_NAME_REPL}, (cityHash64(concat(toString(txn_id), '|', toString(txn_updated_at)))));
 """
 
 INIT_QUERY_SVC = f"""
@@ -238,14 +238,17 @@ def check_str(value):
 
 
 def check_int(value):
-    if isinstance(value, int):
-        return value
-    else:
+    if value is None:
         return None
+    elif isinstance(value, int) or str(value).isdigit():
+        return int(value)
+
 
 
 def check_float(value):
-    if isinstance(value, float) or isinstance(value, str):
+    if value is None:
+        return None
+    elif isinstance(value, float) or isinstance(value, str):
         return float(value)
     else:
         return None
@@ -279,8 +282,8 @@ def preparing_data(api_answer):
     dict_list = []
     for record in api_answer:
         dict_tmp = {}
-        dict_tmp.update({'txn_id': check_str(record.get('txn_id')),
-                         'project_id': int(record.get('project_id')),
+        dict_tmp.update({'txn_id': check_int(record.get('txn_id')),
+                         'project_id': check_int(record.get('project_id')),
                          'mst_id': check_str(record.get('mst_id')),
                          'merch_id': check_str(record.get('merch_id')),
                          'mst_name': check_str(record.get('mst_name')),
@@ -327,7 +330,6 @@ def preparing_data(api_answer):
         dict_list.append(dict_tmp)
     return dict_list
 
-
 @logs_decorator
 async def connect_to_db():
     client = Client(host=host_addr, port=port_num, user=user_name, password=user_passwd, database=name_base)
@@ -356,7 +358,7 @@ async def init_database(client):
 
 @logs_decorator
 async def insert_to_db(client, data):
-    result = await client.execute(f'INSERT INTO {TABLE_NAME_DIST} ({columns_str}) VALUES', data)
+    result = await client.execute(f'INSERT INTO {TABLE_NAME_REPL} ({columns_str}) VALUES', data)
     return True, result
 
 
@@ -366,7 +368,6 @@ async def service_record(client, status, count_row):
     dict_tmp = {'row_count': count_row, 'status': status, 'date': now}
     await client.execute(
         f'INSERT INTO {TABLE_NAME_SVC} ({columns_svc_str}) VALUES', [dict_tmp], types_check=True)
-
 
 @logs_decorator
 async def service_func(client):
@@ -403,7 +404,6 @@ async def service_func(client):
         updated_from = values_list[index + 1][2]
         return date_from, updated_from
 
-
 @logs_decorator
 async def async_main():
     client = await connect_to_db()
@@ -414,18 +414,24 @@ async def async_main():
     status, count_row = False, 0
     try:
         date_from, updated_from = await service_func(client)
+        # date_from = '2024-10-18 08:00:04'
+        # updated_from = '2024-10-18 08:00:04'
+        # date_to = '2024-10-18 08:01:00'
+        # updated_to = '2024-10-18 08:01:01'
         params = {
             "txn_cms_created_at": "any",
             "date_from": date_from.strftime('%Y-%m-%d %H:%M:%S'),
             "updated_from": updated_from.strftime('%Y-%m-%d %H:%M:%S')
+            # "date_to": date_to,
+            # "updated_to": updated_to
         }
         response = requests.get(PSP_EXPORT_1C_BASE_URL, params=params, verify=False)
         records = response.json()
+        # with open ('./txn.json', 'w', encoding='utf-8') as f:
+        #     f.write(json.dumps(records, ensure_ascii=False, indent=4))
         count = len(records)
         print('Кол-во транзакций ', count)
         print(params)
-        # with open ('./test.json', 'w', encoding='utf-8') as f:
-        #     f.write(json.dumps(records, ensure_ascii=False, indent=4))
         data = preparing_data(records)
         status, count_row = await insert_to_db(client, data)
     finally:
